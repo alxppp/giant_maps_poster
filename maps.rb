@@ -227,42 +227,6 @@ def preview
 end
 
 def donwload_tiles(crop)
-  # spiral_step_count = 25
-
-  # ((crop[:width] * crop[:height]) / spiral_step_count).times do
-  #   pointer = {x: Random.rand(crop[:width]), y: Random.rand(crop[:height])}
-
-  #   step_size = 1
-  #   step_size_grow = 0
-  #   step_counter = 1
-  #   step_direction = :up
-
-  #   direction_change = {up: :left, left: :down, down: :right, right: :up}
-
-  #   (0..spiral_step_count).each do |i|
-  #     if pointer[:x] >= 0 && pointer[:y] >= 0 && pointer[:x] < crop[:width] && pointer[:y] < crop[:height]
-  #       tile_path x: crop[:x] + pointer[:x], y: crop[:y] + pointer[:y], zoom: crop[:zoom]
-  #     end
-
-  #     case step_direction
-  #     when :up then pointer[:y] -= 1
-  #     when :left then pointer[:x] -= 1
-  #     when :down then pointer[:y] += 1
-  #     when :right then pointer[:x] += 1
-  #     end
-
-  #     step_counter -= 1 unless i.zero?
-  #     if step_counter.zero?
-  #       step_size += step_size_grow
-  #       step_size_grow = 1 - step_size_grow
-  #       step_counter = step_size
-  #       step_direction = direction_change[step_direction]
-  #     end
-  #   end
-
-  #   sleep Random.rand * 20.0
-  # end
-
   (0...crop[:height]).each do |y|
     (0...crop[:width]).each do |x|
       tile_path x: crop[:x] + x, y: crop[:y] + y, zoom: crop[:zoom]
