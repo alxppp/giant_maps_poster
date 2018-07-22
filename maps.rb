@@ -10,13 +10,30 @@ require 'pry'
 require 'pry-byebug'
 
 require 'mini_magick'
+require 'prawn'
+require 'prawn/measurement_extensions'
+
+require 'parallel'
 
 TILE_SIZE = 512 # px
-PRINT_WIDTH = 1.0 # m
-PRINT_ZOOM = 15
+PRINT_WIDTH = 5.0 # m
+PRINT_ZOOM = 7
 # CROP = {x: 15, y: 10, width: 4, height: 2, zoom: 5}.freeze # tiles # Europe
-# CROP = {x: 0, y: 2, width: 16, height: 11, zoom: 4}.freeze # tiles # World
-CROP = {x: 2178, y: 1420, width: 3, height: 3, zoom: 12}.freeze # tiles # Munich
+CROP = {x: 0, y: 5, width: 32, height: 20, zoom: 5, key: 'world'}.freeze # tiles # World
+# CROP = {x: 2178, y: 1420, width: 3, height: 3, zoom: 12, key: 'munich'}.freeze # tiles # Munich
+# CROP = {x: 34871, y: 22738, width: 6, height: 6, zoom: 16, key: 'uni'}.freeze # tiles # Uni
+# CROP = {x: 34871, y: 22738, width: 6, height: 6, zoom: 16, key: 'uni'}.freeze # tiles # Uni
+
+# h = roads only
+# m = standard roadmap
+# p = Terrain mit Beschriftungen (Ländergrenzen, Ländernamen, etc.).
+# r = somehow altered roadmap
+# s = satellite only
+# t = terrain only
+# y = hybrid
+# watercolor = Wasserfarbe
+# LYRS = 'watercolor_google_overlay'.freeze
+LYRS = 'p'
 
 puts 'WARNING: PRINT_ZOOM smaller than CROP zoom' if PRINT_ZOOM < CROP[:zoom]
 
@@ -55,21 +72,76 @@ def project(geo)
   {x: TILE_SIZE * (0.5 + geo[:lon] / 360), y: TILE_SIZE * (0.5 - Math.log((1 + siny) / (1 - siny)) / (4 * Math::PI))}
 end
 
+def tile_to_geo(tile)
+  n = 2.0 ** tile[:zoom]
+
+  lon_deg = tile[:x] / n * 360.0 - 180.0
+  lat_rad = Math::atan(Math::sinh(Math::PI * (1 - 2 * tile[:y] / n)))
+  lat_deg = 180.0 * (lat_rad / Math::PI)
+
+  {lat: lat_deg, lon: lon_deg}
+end
+
 def tile_url(tile)
-  "https://mt0.google.com/vt?lyrs=p&scale=#{TILE_SIZE / 256}&x=#{tile[:x]}&y=#{tile[:y]}&z=#{tile[:zoom]}&hl=loc"
+  case LYRS
+  when 'watercolor'
+    "http://c.tile.stamen.com/watercolor/#{tile[:zoom]}/#{tile[:x]}/#{tile[:y]}.jpg"
+  when 'google_overlay'
+    # poi.business  33
+
+    # poi.attraction  37
+    # poi.government  34
+    # poi.medical  36
+    # poi.park  40
+    # poi.place_of_worship  38
+    # poi.school  35
+    # poi.sports_complex  39
+
+    # https://stackoverflow.com/questions/29692737/customizing-google-map-tile-server-url
+
+    "https://mts0.google.com/vt/lyrs=h&hl=de&src=app&x=#{tile[:x]}&y=#{tile[:y]}&z=#{tile[:zoom]}&scale=#{TILE_SIZE / 256}&apistyle=s.t:37|s.e:l|p.v:off;s.t:34|s.e:l|p.v:off;s.t:36|s.e:l|p.v:off;s.t:40|s.e:l|p.v:off;s.t:38|s.e:l|p.v:off;s.t:35|s.e:l|p.v:off;s.t:39|s.e:l|p.v:off"
+  else
+    "https://mt0.google.com/vt?lyrs=#{LYRS}&scale=#{TILE_SIZE / 256}&x=#{tile[:x]}&y=#{tile[:y]}&z=#{tile[:zoom]}&hl=loc"
+  end
 end
 
 def tile_path(tile)
   base_path = File.dirname __FILE__
   dir_path = "#{base_path}/tiles/#{tile[:zoom]}"
-  file_path = "#{dir_path}/#{tile[:x]}_#{tile[:y]}.png"
+  lyrs_path = "#{dir_path}/#{LYRS}"
+  file_path = "#{lyrs_path}/#{tile[:x]}_#{tile[:y]}.png"
 
   unless File.exist? file_path
+    puts "Downloading #{tile[:x]}, #{tile[:y]}, #{tile[:zoom]}"
     Dir.mkdir dir_path unless Dir.exist? dir_path
-    `wget -q -O #{file_path} "#{tile_url(tile)}"`
+    Dir.mkdir lyrs_path unless Dir.exist? lyrs_path
+
+    `touch #{file_path}`
+
+    # proxy = '127.0.0.1:5566'
+    proxy = nil
+
+    if proxy.present?
+      cmd = "wget -e use_proxy=yes -e http_proxy=127.0.0.1:5566 -e https_proxy=127.0.0.1:5566 -q -O #{file_path} \"#{tile_url(tile)}\""
+      # puts cmd
+      `#{cmd}`
+    else
+      `wget -q -O #{file_path} "#{tile_url(tile)}"`
+    end
+
+    if File.size(file_path).zero?
+      File.delete file_path
+      puts 'Google blocked ip'
+      # throw 'Google blocked ip'
+    end
   end
 
   file_path
+end
+
+def tile_from_path(path)
+  match = path.match /((\A|\/)(?<zoom>\d+)\/)?(?<x>\d+)_(?<y>\d+).png\z/
+  {x: match[:x].to_i, y: match[:y].to_i, zoom: match[:zoom].try(:to_i)}
 end
 
 def imgcat(path)
@@ -77,6 +149,9 @@ def imgcat(path)
 end
 
 def concat_tiles(tile_paths, width, height, output_path)
+  dir_path = File.expand_path("..", output_path)
+  Dir.mkdir dir_path unless Dir.exist? dir_path
+
   # MiniMagick.logger.level = Logger::DEBUG
   montage = MiniMagick::Tool::Montage.new
   tile_paths.each { |tile| montage << tile }
@@ -124,7 +199,7 @@ def preview_crop(width)
 end
 
 def preview
-  preview_width = 1000 # px
+  preview_width = 1200 # px
   preview_path = "#{File.dirname __FILE__}/preview.png"
   crop = preview_crop preview_width
 
@@ -151,18 +226,134 @@ def preview
   imgcat preview_path
 end
 
-# lat, lon, zoom = 48.1351, 11.5820, 8 #41.850, -87.650, 3
-# _, _, x, y = tile_coordinates(lat, lon, zoom)
-# path = tile_path(lat, lon, zoom)
+def donwload_tiles(crop)
+  # spiral_step_count = 25
 
-# MiniMagick::Image.new(path) do |b|
-#   b.fill 'red'
-#   b.stroke 'black'
-#   b.draw "circle #{x},#{y} #{x + 10},#{y}"
+  # ((crop[:width] * crop[:height]) / spiral_step_count).times do
+  #   pointer = {x: Random.rand(crop[:width]), y: Random.rand(crop[:height])}
+
+  #   step_size = 1
+  #   step_size_grow = 0
+  #   step_counter = 1
+  #   step_direction = :up
+
+  #   direction_change = {up: :left, left: :down, down: :right, right: :up}
+
+  #   (0..spiral_step_count).each do |i|
+  #     if pointer[:x] >= 0 && pointer[:y] >= 0 && pointer[:x] < crop[:width] && pointer[:y] < crop[:height]
+  #       tile_path x: crop[:x] + pointer[:x], y: crop[:y] + pointer[:y], zoom: crop[:zoom]
+  #     end
+
+  #     case step_direction
+  #     when :up then pointer[:y] -= 1
+  #     when :left then pointer[:x] -= 1
+  #     when :down then pointer[:y] += 1
+  #     when :right then pointer[:x] += 1
+  #     end
+
+  #     step_counter -= 1 unless i.zero?
+  #     if step_counter.zero?
+  #       step_size += step_size_grow
+  #       step_size_grow = 1 - step_size_grow
+  #       step_counter = step_size
+  #       step_direction = direction_change[step_direction]
+  #     end
+  #   end
+
+  #   sleep Random.rand * 20.0
+  # end
+
+  (0...crop[:height]).each do |y|
+    (0...crop[:width]).each do |x|
+      tile_path x: crop[:x] + x, y: crop[:y] + y, zoom: crop[:zoom]
+    end
+  end
+end
+
+def make_prints
+  paper_physical_size = {width: 0.18, height: 0.28 } # m
+
+  paper_size = {width: ((paper_physical_size[:width] / ($print_tile_size)) * TILE_SIZE).floor,
+      height: ((paper_physical_size[:height] / ($print_tile_size)) * TILE_SIZE).floor} # px
+
+  total_size = {width: $print_crop[:width] * TILE_SIZE, height: $print_crop[:height] * TILE_SIZE}
+
+  puts '---'
+  puts "Paper width: #{paper_size[:width]} px"
+  puts "Total width: #{total_size[:width]} px"
+
+  (0...total_size[:height]).step(paper_size[:height]).each_with_index do |paper_y1, paper_y_i|
+    paper_y2 = [paper_y1 + paper_size[:height], total_size[:height]].min
+
+    tile_y_min, tile_y_max = 0
+    crop_top, crop_bottom = 0
+    (0...total_size[:height]).step(TILE_SIZE).each_with_index do |tile_y1, tile_y_i|
+      tile_y2 = tile_y1 + TILE_SIZE
+
+      if tile_y1 <= paper_y1 && tile_y2 >= paper_y1
+        tile_y_min = tile_y_i
+        crop_top = paper_y1 - tile_y1
+      end
+
+      if tile_y1 <  paper_y2 && tile_y2 >= paper_y2
+        tile_y_max = tile_y_i
+        crop_bottom = tile_y2 - paper_y2
+      end
+    end
+
+    (0...total_size[:width]).step(paper_size[:width]).each_with_index do |paper_x1, paper_x_i|
+      paper_x2 = [paper_x1 + paper_size[:width], total_size[:width]].min
+
+      tile_x_min, tile_x_max = 0
+      crop_left, crop_right = 0
+      (0...total_size[:width]).step(TILE_SIZE).each_with_index do |tile_x1, tile_x_i|
+        tile_x2 = tile_x1 + TILE_SIZE
+
+        if tile_x1 <= paper_x1 && tile_x2 >= paper_x1
+          tile_x_min = tile_x_i
+          crop_left = paper_x1 - tile_x1
+        end
+
+        if tile_x1 <  paper_x2 && tile_x2 >= paper_x2
+          tile_x_max = tile_x_i
+          crop_right = tile_x2 - paper_x2
+        end
+      end
+
+      tiles = []
+      (tile_y_min..tile_y_max).each do |tile_y|
+        (tile_x_min..tile_x_max).each do |tile_x|
+          tiles << tile_path(x: $print_crop[:x] + tile_x, y: $print_crop[:y] + tile_y, zoom: $print_crop[:zoom])
+        end
+      end
+
+      render_path = "#{File.dirname __FILE__}/renders/#{CROP[:key]}/#{paper_x_i}_#{paper_y_i}.png"
+
+      concat_tiles(tiles, tile_x_max - tile_x_min + 1, tile_y_max - tile_y_min + 1, render_path)
+
+      MiniMagick::Image.new(render_path) do |b|
+        b.crop "#{paper_x2 - paper_x1}x#{paper_y2 - paper_y1}+#{crop_left}+#{crop_top}"
+      end
+
+      render_physical_width = ((paper_x2 - paper_x1) / paper_size[:width].to_f) * paper_physical_size[:width] # m
+      pdf = Prawn::Document.new(page_size: 'A4')
+      pdf.image render_path, at: [0.cm, 28.cm - 5.mm], width: render_physical_width.m
+      pdf.render_file("prints/#{CROP[:key]}/#{paper_x_i}_#{paper_y_i}.pdf")
+    end
+
+  end
+end
+
+# Preview
+# preview
+
+# Download
+# Parallel.each(1..5, in_processes: 5) do
+#   Parallel.each(1..10, in_threads: 10) do
+#     donwload_tiles $print_crop
+#   end
 # end
 
-#imgcat path
+# Make prints
+# make_prints
 
-#p tile_path($print_crop)
-
-preview
