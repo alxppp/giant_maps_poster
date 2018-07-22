@@ -8,3 +8,6 @@ gem 'pry'
 gem 'pry-byebug'
 
 gem 'mini_magick'
+gem 'prawn'
+
+gem 'parallel'

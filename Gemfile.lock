@@ -16,6 +16,11 @@ GEM
     method_source (0.9.0)
     mini_magick (4.8.0)
     minitest (5.10.3)
+    parallel (1.12.0)
+    pdf-core (0.7.0)
+    prawn (2.2.2)
+      pdf-core (~> 0.7.0)
+      ttfunk (~> 1.5)
     pry (0.11.2)
       coderay (~> 1.1.0)
       method_source (~> 0.9.0)
@@ -23,6 +28,7 @@ GEM
       byebug (~> 9.1)
       pry (~> 0.10)
     thread_safe (0.3.6)
+    ttfunk (1.5.1)
     tzinfo (1.2.3)
       thread_safe (~> 0.1)
 
@@ -34,6 +40,8 @@ DEPENDENCIES
   colorize
   facets
   mini_magick
+  parallel
+  prawn
   pry
   pry-byebug
 
