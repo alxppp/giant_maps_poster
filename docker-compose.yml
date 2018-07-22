@@ -1,0 +1,28 @@
+version: '2'
+
+networks:
+  backend:
+
+services:
+  proxy:
+    image: mattes/rotating-proxy:latest
+    container_name: maps-proxy
+    hostname: maps-proxy
+    environment:
+      - tors=50
+    networks:
+      backend:
+
+  app:
+    build: ./
+    container_name: maps-app
+    hostname: maps-app
+    command: tail -f /dev/null
+    volumes:
+      - ./:/usr/src/app
+    environment:
+      - LANG=C.UTF-8
+    depends_on:
+      - proxy
+    networks:
+      backend:
